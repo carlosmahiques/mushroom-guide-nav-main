@@ -5,6 +5,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { NavLink } from "react-router-dom";
 import {
   Map,
+  Brain,
   Pin,
   CloudRain,
   Bell,
@@ -25,6 +26,12 @@ const mainNavItems = [
     url: "/mapa",
     icon: Map,
     description: "Explora y añade tus sétales"
+  },
+  {
+    title: "Setales Inteligentes",
+    url: "/mapa-inteligente",
+    icon: Brain,
+    description: "Análisis predictivo por setal"
   },
   {
     title: "Mis sétales", 

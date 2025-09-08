@@ -8,6 +8,7 @@ import { ProtectedRoute } from "./components/ProtectedRoute";
 import { AppShell } from "./components/AppShell";
 import Index from "./pages/Index";
 import Mapa from "./pages/Mapa";
+import MapaInteligente from "./pages/MapaInteligente";
 import Setales from "./pages/Setales";
 import Datos from "./pages/Datos";
 import Alertas from "./pages/Alertas";
@@ -41,6 +42,13 @@ const App = () => (
               <ProtectedRoute>
                 <AppShell>
                   <Mapa />
+                </AppShell>
+              </ProtectedRoute>
+            } />
+            <Route path="/mapa-inteligente" element={
+              <ProtectedRoute>
+                <AppShell>
+                  <MapaInteligente />
                 </AppShell>
               </ProtectedRoute>
             } />
