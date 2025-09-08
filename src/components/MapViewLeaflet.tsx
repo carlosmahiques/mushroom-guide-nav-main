@@ -116,7 +116,8 @@ export default function MapViewLeaflet({
   const [pendingLatLng, setPendingLatLng] = useState<{lat: number; lng: number} | null>(null);
 
   // Prediction overlay (feature-flagged)
-  const enablePred = import.meta.env?.VITE_ENABLE_PRED_LAYER === '1';
+  const flagRaw = (import.meta.env?.VITE_ENABLE_PRED_LAYER as any) ?? '';
+  const enablePred = ['1', 'true', 'on', 'yes'].includes(String(flagRaw).toLowerCase());
   const [predOn, setPredOn] = useState(false);
   const [predOpacity, setPredOpacity] = useState(0.35);
   const [predLoading, setPredLoading] = useState(false);
@@ -614,7 +615,7 @@ export default function MapViewLeaflet({
       )}
       {/* Prediction controls and legend (feature-flagged) */}
       {enablePred && (
-        <div className="absolute top-16 right-4 flex flex-col gap-2 items-end z-[1000]">
+        <div className="absolute top-16 right-4 flex flex-col gap-2 items-end z-[2000] pointer-events-auto">
           <div className="bg-white/90 backdrop-blur px-3 py-2 rounded-md shadow">
             <label className="flex items-center gap-2 text-sm">
               <input
