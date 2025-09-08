@@ -58,7 +58,8 @@ serve(async (req) => {
   }
 
   try {
-    const { lat, lng, spotId, operation = 'current' } = await req.json();
+    const requestBody = await req.json();
+    const { lat, lng, spotId, operation = 'current', bbox, zoom } = requestBody;
     
     console.log(`📍 Request: operation=${operation}, lat=${lat}, lng=${lng}, spotId=${spotId}`);
     
@@ -264,8 +265,6 @@ serve(async (req) => {
 
     } else if (operation === 'grid') {
       console.log('🗺️ Grid prediction operation requested');
-      
-      const { bbox, zoom } = await req.json();
       
       if (!bbox || !bbox.s || !bbox.w || !bbox.n || !bbox.e) {
         console.error('❌ Invalid bbox provided:', bbox);
