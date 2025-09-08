@@ -116,7 +116,7 @@ export default function MapViewLeaflet({
   const [pendingLatLng, setPendingLatLng] = useState<{lat: number; lng: number} | null>(null);
 
   // Prediction overlay (feature-flagged)
-  const enablePred = (import.meta as any).env?.VITE_ENABLE_PRED_LAYER === '1';
+  const enablePred = import.meta.env?.VITE_ENABLE_PRED_LAYER === '1';
   const [predOn, setPredOn] = useState(false);
   const [predOpacity, setPredOpacity] = useState(0.35);
   const [predLoading, setPredLoading] = useState(false);
@@ -331,12 +331,29 @@ export default function MapViewLeaflet({
       predLayerRef.current = null;
     }
     const group = L.layerGroup();
+    // Analytics: view refresh
+    try {
+      const b = map.getBounds();
+      logEvent('pred_view_refresh', {
+        zoom: Math.floor(map.getZoom()),
+        bbox: { s: b.getSouth(), w: b.getWest(), n: b.getNorth(), e: b.getEast() },
+        cells: cells.length,
+      });
+    } catch {}
     cells.forEach((cell) => {
       const rect = L.rectangle(cell.bounds as any, {
         color: 'transparent',
         weight: 0,
         fillColor: colorForScore(cell.score),
         fillOpacity: predOpacity,
+      });
+      // Analytics: cell inspect on hover/tap
+      rect.on('mouseover', () => {
+        try {
+          logEvent('pred_cell_inspect', {
+            score_bucket: Math.floor(cell.score * 10) / 10,
+          });
+        } catch {}
       });
       rect.bindTooltip(
         `Prob. fructificación: ${(cell.score * 100).toFixed(0)}%`+
@@ -597,7 +614,7 @@ export default function MapViewLeaflet({
       )}
       {/* Prediction controls and legend (feature-flagged) */}
       {enablePred && (
-        <div className="absolute top-16 right-4 flex flex-col gap-2 items-end z-40">
+        <div className="absolute top-16 right-4 flex flex-col gap-2 items-end z-[1000]">
           <div className="bg-white/90 backdrop-blur px-3 py-2 rounded-md shadow">
             <label className="flex items-center gap-2 text-sm">
               <input
