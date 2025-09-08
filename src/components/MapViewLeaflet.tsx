@@ -118,6 +118,7 @@ export default function MapViewLeaflet({
   // Prediction overlay (feature-flagged)
   const flagRaw = (import.meta.env?.VITE_ENABLE_PRED_LAYER as any) ?? '';
   const enablePred = ['1', 'true', 'on', 'yes'].includes(String(flagRaw).toLowerCase());
+  const predSource = (import.meta.env.VITE_PRED_SOURCE || 'mock').toLowerCase(); // 'real' or 'mock'
   const [predOn, setPredOn] = useState(false);
   const [predOpacity, setPredOpacity] = useState(0.35);
   const [predLoading, setPredLoading] = useState(false);
@@ -320,11 +321,33 @@ export default function MapViewLeaflet({
   }, [isClient, center.lat, center.lng, zoom, sessionUserId]);
 
   // Build or rebuild prediction overlay
-  const refreshPrediction = () => {
+  const refreshPrediction = async () => {
     if (!leafletMapRef.current || !predOn) return;
     const map = leafletMapRef.current as L.Map;
     setPredLoading(true);
-    const cells = buildGrid(map.getBounds(), Math.floor(map.getZoom()));
+
+    let cells: GridCell[] = [];
+    if (predSource === 'real') {
+      try {
+        const b = map.getBounds();
+        const response = await supabase.functions.invoke('aemet-weather', {
+          body: {
+            operation: 'grid',
+            bbox: { s: b.getSouth(), w: b.getWest(), n: b.getNorth(), e: b.getEast() },
+            zoom: Math.floor(map.getZoom()),
+          },
+        });
+        if (response.error) throw response.error;
+        cells = response.data as GridCell[];
+        toast.success('Datos de predicción AEMET cargados.');
+      } catch (error) {
+        console.error('Error fetching real prediction data, falling back to mock:', error);
+        toast.error('Error cargando predicción real, usando datos simulados.');
+        cells = buildGrid(map.getBounds(), Math.floor(map.getZoom())); // Fallback to mock
+      }
+    } else {
+      cells = buildGrid(map.getBounds(), Math.floor(map.getZoom()));
+    }
     predCellsRef.current = cells;
 
     if (predLayerRef.current) {
