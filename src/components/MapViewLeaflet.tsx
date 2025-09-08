@@ -1,11 +1,15 @@
 import { useEffect, useState, useRef } from "react";
-import { useMapData } from "@/hooks/useMapData";
+import type { UiMarker } from "@/hooks/useMapData";
 import { useDemoMode } from "@/hooks/useDemoMode";
 import { useDemoMarkers } from "@/hooks/useDemoMarkers";
 import { useGatedAction } from "@/hooks/useGatedAction";
 import { useAnalytics } from "@/hooks/useAnalytics";
 import { toast } from "sonner";
 import L from "leaflet";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Button } from "@/components/ui/button";
 // CSS se carga dinámicamente cuando se necesita el mapa
 import markerIcon2x from "leaflet/dist/images/marker-icon-2x.png";
 import markerIcon from "leaflet/dist/images/marker-icon.png";
@@ -17,6 +21,10 @@ type MapViewLeafletProps = {
   height?: string;
   className?: string;
   placingMode?: boolean;
+  markers: UiMarker[];
+  sessionUserId: string | null;
+  addSpot: (lat: number, lng: number, title: string, description?: string, species?: string) => Promise<boolean>;
+  deleteSpot: (spotId: string) => Promise<boolean>;
 };
 
 // Tipos para el mapa
@@ -27,27 +35,48 @@ L.Icon.Default.mergeOptions({
   shadowUrl: markerShadow,
 });
 
-// Crear icono personalizado para setales
-const createSetalIcon = () => {
+// Iconos por especie (divIcon con color + letra)
+const speciesStyle: Record<string, { color: string; letter: string; name: string }> = {
+  boletus_edulis: { color: '#8B4513', letter: 'B', name: 'Boleto' },
+  amanita_caesarea: { color: '#FF6B6B', letter: 'A', name: 'Oronja' },
+  lactarius_deliciosus: { color: '#FF8C00', letter: 'L', name: 'Níscalo' },
+  cantharellus_cibarius: { color: '#FFD700', letter: 'C', name: 'Rebozuelo' },
+  macrolepiota_procera: { color: '#8B4513', letter: 'P', name: 'Parasol' },
+  pleurotus_eryngii: { color: '#9370DB', letter: 'E', name: 'Seta de cardo' },
+  marasmius_oreades: { color: '#4A90E2', letter: 'S', name: 'Senderuela' },
+  agaricus_campestris: { color: '#808080', letter: 'G', name: 'Champiñón silvestre' },
+  hydnum_repandum: { color: '#DEB887', letter: 'H', name: 'Lengua de gato' },
+  morchella_esculenta: { color: '#654321', letter: 'M', name: 'Colmenilla' },
+  otro: { color: '#22c55e', letter: '?', name: 'Otro' },
+};
+
+const speciesOptions: { key: string; label: string }[] = [
+  { key: 'boletus_edulis', label: 'Boletus edulis (Boleto)' },
+  { key: 'amanita_caesarea', label: 'Amanita caesarea (Oronja)' },
+  { key: 'lactarius_deliciosus', label: 'Lactarius deliciosus (Níscalo)' },
+  { key: 'cantharellus_cibarius', label: 'Cantharellus cibarius (Rebozuelo)' },
+  { key: 'macrolepiota_procera', label: 'Macrolepiota procera (Parasol)' },
+  { key: 'pleurotus_eryngii', label: 'Pleurotus eryngii (Seta de cardo)' },
+  { key: 'marasmius_oreades', label: 'Marasmius oreades (Senderuela)' },
+  { key: 'agaricus_campestris', label: 'Agaricus campestris (Champiñón silvestre)' },
+  { key: 'hydnum_repandum', label: 'Hydnum repandum (Lengua de gato)' },
+  { key: 'morchella_esculenta', label: 'Morchella esculenta (Colmenilla)' },
+  { key: 'otro', label: 'Otro' },
+];
+
+const speciesLabel = (key?: string | null) => speciesOptions.find(o => o.key === key)?.label || 'Otro';
+
+const createSpeciesIcon = (species?: string | null) => {
+  const s = speciesStyle[species || 'otro'] || speciesStyle.otro;
   return L.divIcon({
-    className: 'setal-marker',
+    className: 'species-marker',
     html: `<div style="
-      width: 24px; 
-      height: 24px; 
-      background: #22c55e; 
-      border: 3px solid white; 
-      border-radius: 50%; 
-      box-shadow: 0 2px 6px rgba(0,0,0,0.3);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 12px;
-      color: white;
-      font-weight: bold;
-    ">🍄</div>`,
-    iconSize: [24, 24],
-    iconAnchor: [12, 12],
-    popupAnchor: [0, -12]
+      width: 28px; height: 28px; background: ${s.color}; border: 3px solid white; border-radius: 50%;
+      box-shadow: 0 3px 8px rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center;
+      font-size: 14px; color: white; font-weight: bold; font-family: system-ui, -apple-system, sans-serif;">${s.letter}</div>`,
+    iconSize: [28, 28],
+    iconAnchor: [14, 14],
+    popupAnchor: [0, -14]
   });
 };
 
@@ -57,18 +86,26 @@ export default function MapViewLeaflet({
   height = "70vh",
   className = "",
   placingMode = false,
+  markers,
+  sessionUserId,
+  addSpot,
+  deleteSpot,
 }: MapViewLeafletProps) {
   const mapRef = useRef<HTMLDivElement>(null);
   const leafletMapRef = useRef<any>(null);
   const [isLoaded, setIsLoaded] = useState(false);
   const [isClient, setIsClient] = useState(false);
   const [cssLoaded, setCssLoaded] = useState(false);
-  const { markers, sessionUserId, loading, addSpot, deleteSpot } = useMapData();
   const { isDemoMode } = useDemoMode();
   const demoMarkers = useDemoMarkers();
   const { gatedAction } = useGatedAction();
   const { logEvent } = useAnalytics();
   const placingRef = useRef<boolean>(placingMode);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [formTitle, setFormTitle] = useState("");
+  const [formDesc, setFormDesc] = useState("");
+  const [formSpecies, setFormSpecies] = useState<string>('boletus_edulis');
+  const [pendingLatLng, setPendingLatLng] = useState<{lat: number; lng: number} | null>(null);
 
   // Cargar CSS de Leaflet dinámicamente
   useEffect(() => {
@@ -229,36 +266,12 @@ export default function MapViewLeaflet({
         if (!gatedAction('create_setal', { coordinates: e.latlng })) {
           return;
         }
-        const title = prompt("Título del sétal (3–40 caracteres):");
-        if (!title) return;
-        if (title.length < 3 || title.length > 40) {
-          toast.error("El título debe tener entre 3 y 40 caracteres");
-          return;
-        }
-        const description = prompt("Descripción (opcional, hasta 140):") || "";
-        if (description.length > 140) {
-          toast.error("La descripción no puede superar 140 caracteres");
-          return;
-        }
         const { lat, lng } = e.latlng;
-        
-        // Log setal_create antes de crear
-        const setalId = Date.now().toString();
-        logEvent('setal_create', {
-          setal_id: setalId,
-          coordinates: { lat, lng },
-          especie: 'desconocida', // TODO: Obtener del formulario
-          time_to_first_setal: 0 // TODO: Calcular tiempo desde registro
-        });
-        
-        toast.promise(
-          addSpot(lat, lng, title, description),
-          {
-            loading: "Guardando sétal...",
-            success: () => "¡Sétal guardado correctamente!",
-            error: "Error al guardar el sétal",
-          }
-        );
+        setPendingLatLng({ lat, lng });
+        setFormTitle("");
+        setFormDesc("");
+        setFormSpecies('boletus_edulis');
+        setCreateOpen(true);
       });
 
       setIsLoaded(true);
@@ -294,13 +307,15 @@ export default function MapViewLeaflet({
     });
 
     // Add user markers
-    markers.forEach((marker) => {
-      const leafletMarker = L.marker([marker.lat, marker.lng], { icon: createSetalIcon() })
+    markers.forEach(async (marker) => {
+      const icon = createSpeciesIcon(marker.species);
+      const leafletMarker = L.marker([marker.lat, marker.lng], { icon })
         .addTo(leafletMapRef.current);
 
       const popupContent = `
         <div style="font-family: system-ui; min-width: 200px;">
           <div style="font-weight: 600; margin-bottom: 4px;">${marker.title}</div>
+          ${marker.species ? `<div style="font-size: 12px; color: #3b82f6; font-weight: 600; margin-bottom: 4px;">Especie: ${marker.species}</div>` : ''}
           ${marker.description ? `<div style="font-size: 14px; color: #666; margin-bottom: 4px;">${marker.description}</div>` : ''}
           <div style="font-size: 12px; color: #999; margin-bottom: 8px;">
             (${marker.lat.toFixed(5)}, ${marker.lng.toFixed(5)})
@@ -435,6 +450,57 @@ export default function MapViewLeaflet({
           minHeight: "400px"
         }} 
       />
+      {/* Dialog Crear Sétal */}
+      <Dialog open={createOpen} onOpenChange={setCreateOpen} modal={false}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Nuevo sétal</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <Input placeholder="Título (3–40)" value={formTitle} onChange={(e) => setFormTitle(e.target.value)} />
+            <Textarea placeholder="Descripción (opcional, hasta 140)" value={formDesc} onChange={(e) => setFormDesc(e.target.value)} />
+            <div>
+              <label className="block text-sm mb-1">Especie</label>
+              <select 
+                value={formSpecies} 
+                onChange={(e) => setFormSpecies(e.target.value)}
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+              >
+                {speciesOptions.map(opt => (
+                  <option key={opt.key} value={opt.key}>{opt.label}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCreateOpen(false)}>Cancelar</Button>
+            <Button
+              onClick={async () => {
+                if (!pendingLatLng) return;
+                const title = formTitle.trim();
+                if (title.length < 3 || title.length > 40) {
+                  toast.error('El título debe tener entre 3 y 40 caracteres');
+                  return;
+                }
+                if (formDesc.length > 140) {
+                  toast.error('La descripción no puede superar 140 caracteres');
+                  return;
+                }
+                const { lat, lng } = pendingLatLng;
+                const setalId = Date.now().toString();
+                logEvent('setal_create', { setal_id: setalId, coordinates: { lat, lng }, especie: formSpecies });
+                const ok = await addSpot(lat, lng, title, formDesc, formSpecies);
+                if (ok) {
+                  toast.success('¡Sétal guardado correctamente!');
+                  setCreateOpen(false);
+                } else {
+                  toast.error('Error al guardar el sétal');
+                }
+              }}
+            >Guardar</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       {!isLoaded && (
         <div className="absolute inset-0 flex items-center justify-center bg-muted">
           <div className="text-center">

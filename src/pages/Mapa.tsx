@@ -20,7 +20,18 @@ import { isFeatureEnabled } from "@/config/featureFlags";
 const Mapa = () => {
   const [placing, setPlacing] = useState(false);
   const [showRegisterModal, setShowRegisterModal] = useState(false);
-  const { totalSpots, exploredZones, createdThisMonth } = useMapData();
+  const { 
+    markers,
+    sessionUserId,
+    addSpot,
+    deleteSpot,
+    totalSpots,
+    exploredZones,
+    createdThisMonth
+  } = useMapData();
+  
+  // Debug: Log metrics in component
+  console.log('🗺️ Mapa component metrics:', { totalSpots, exploredZones, createdThisMonth });
   
   // Feature flags
   const isLeanEnabled = isFeatureEnabled('ENABLE_LEAN');
@@ -93,18 +104,7 @@ const Mapa = () => {
             {placing ? 'Haz clic en el mapa' : 'Nuevo sétal'}
           </Button>
           
-          {/* Botón de test temporal - solo en desarrollo */}
-          {import.meta.env.DEV && (
-            <Button 
-              variant="outline"
-              onClick={() => {
-                console.log('🔍 TEST: Forzando modal abierto');
-                setShowRegisterModal(true);
-              }}
-            >
-              TEST Modal
-            </Button>
-          )}
+          {/* Botón de test eliminado */}
         </div>
       </div>
 
@@ -137,6 +137,10 @@ const Mapa = () => {
         height="calc(100dvh - 24rem)"
         className="md:h-[calc(100dvh-20rem)]"
         placingMode={placing}
+        markers={markers}
+        sessionUserId={sessionUserId}
+        addSpot={addSpot}
+        deleteSpot={deleteSpot}
       />
     </ErrorBoundary>
   </CardContent>
@@ -203,8 +207,7 @@ const Mapa = () => {
         />
       )}
       
-      {/* Debug Info - solo en desarrollo */}
-      {import.meta.env.DEV && <DebugInfo />}
+      {/* Debug Info oculto */}
       
       {/* Analytics Debug Overlay - solo en desarrollo */}
       {/* {import.meta.env.DEV && (

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "./useAuth";
 
@@ -21,6 +21,7 @@ export type UiMarker = {
   lat: number; 
   lng: number; 
   createdAt?: string | null;
+  species?: string | null;
 };
 
 export function useMapData() {
@@ -32,37 +33,57 @@ export function useMapData() {
   const [exploredZones, setExploredZones] = useState<number>(0);
   const [createdThisMonth, setCreatedThisMonth] = useState<number>(0);
   
+  // Helper function to update metrics
+  const updateMetrics = useCallback((markersList: UiMarker[]) => {
+    console.log('🔄 updateMetrics called with markers:', markersList.length);
+    
+    const newTotalSpots = markersList.length;
+    const tileKeys = new Set(
+      markersList.map(m => `${Math.floor(m.lat * 20)}-${Math.floor(m.lng * 20)}`)
+    );
+    const newExploredZones = tileKeys.size;
+    const now = new Date();
+    const ym = `${now.getUTCFullYear()}-${String(now.getUTCMonth()+1).padStart(2,'0')}`;
+    const newCreatedThisMonth = markersList.filter(m => m.createdAt?.startsWith(ym)).length;
+    
+    console.log('🔄 Setting metrics:', {
+      totalSpots: newTotalSpots,
+      exploredZones: newExploredZones,
+      createdThisMonth: newCreatedThisMonth,
+      yearMonth: ym
+    });
+    
+    // Use functional updates to ensure state is updated correctly
+    setTotalSpots(prev => {
+      console.log('🔄 setTotalSpots: prev =', prev, 'new =', newTotalSpots);
+      return newTotalSpots;
+    });
+    setExploredZones(prev => {
+      console.log('🔄 setExploredZones: prev =', prev, 'new =', newExploredZones);
+      return newExploredZones;
+    });
+    setCreatedThisMonth(prev => {
+      console.log('🔄 setCreatedThisMonth: prev =', prev, 'new =', newCreatedThisMonth);
+      return newCreatedThisMonth;
+    });
+    
+    console.log('📊 Metrics updated successfully');
+  }, []);
+  
   // Debug: Log state changes
   useEffect(() => {
     console.log('🔄 useMapData state changed:', { totalSpots, exploredZones, createdThisMonth });
-  }, [totalSpots, exploredZones, createdThisMonth]);
+    console.log('🔄 Current markers count:', markers.length);
+  }, [totalSpots, exploredZones, createdThisMonth, markers.length]);
   
   // Update metrics when markers change
   useEffect(() => {
-    console.log('🔄 Updating metrics based on markers:', markers.length);
-    
-    // Update total spots
-    setTotalSpots(markers.length);
-    
-    // Calculate explored zones
-    const tileKeys = new Set(
-      markers.map(m => `${Math.floor(m.lat * 20)}-${Math.floor(m.lng * 20)}`)
-    );
-    setExploredZones(tileKeys.size);
-    
-    // Calculate created this month
-    const now = new Date();
-    const ym = `${now.getUTCFullYear()}-${String(now.getUTCMonth()+1).padStart(2,'0')}`;
-    setCreatedThisMonth(
-      markers.filter(m => m.createdAt?.startsWith(ym)).length
-    );
-    
-    console.log('📊 Metrics updated:', {
-      totalSpots: markers.length,
-      exploredZones: tileKeys.size,
-      createdThisMonth: markers.filter(m => m.createdAt?.startsWith(ym)).length
-    });
-  }, [markers]);
+    console.log('🔄 Markers changed, updating metrics:', markers.length);
+    if (markers.length >= 0) { // Always update, even for empty array
+      updateMetrics(markers);
+    }
+  }, [markers, updateMetrics]);
+  
 
   // Load spots using RPC function
   useEffect(() => {
@@ -94,6 +115,12 @@ export function useMapData() {
 
         console.log("Filtered spots data:", filteredData);
 
+        const parseSpecies = (notes?: string | null): string | null => {
+          if (!notes) return null;
+          const m = notes.match(/\[species:([a-zA-Z0-9_\-]+)\]/);
+          return m ? m[1] : null;
+        };
+
         const mapped: UiMarker[] = filteredData
           .map((s: SpotRow) => {
             if (!s.lat || !s.lng) {
@@ -107,23 +134,13 @@ export function useMapData() {
               lat: s.lat, 
               lng: s.lng,
               createdAt: s.created_at ?? null,
+              species: parseSpecies(s.notes),
             };
           })
           .filter(Boolean) as UiMarker[];
         
         console.log("Final mapped markers:", mapped);
         setMarkers(mapped);
-        // metrics
-        setTotalSpots(mapped.length);
-        const tileKeys = new Set(
-          mapped.map(m => `${Math.floor(m.lat * 20)}-${Math.floor(m.lng * 20)}`)
-        );
-        setExploredZones(tileKeys.size);
-        const now = new Date();
-        const ym = `${now.getUTCFullYear()}-${String(now.getUTCMonth()+1).padStart(2,'0')}`;
-        setCreatedThisMonth(
-          mapped.filter(m => m.createdAt?.startsWith(ym)).length
-        );
         setLoading(false);
       } catch (error) {
         console.error("Error loading map data:", error);
@@ -156,6 +173,12 @@ export function useMapData() {
                 s.user_id === sessionUserId && (s.is_active ?? true)
               );
               
+              const parseSpecies = (notes?: string | null): string | null => {
+                if (!notes) return null;
+                const m = notes.match(/\[species:([a-zA-Z0-9_\-]+)\]/);
+                return m ? m[1] : null;
+              };
+
               const mapped: UiMarker[] = filteredData
                 .map((s: SpotRow) => {
                   if (!s.lat || !s.lng) return null;
@@ -166,6 +189,7 @@ export function useMapData() {
                     lat: s.lat, 
                     lng: s.lng,
                     createdAt: s.created_at ?? null,
+                    species: parseSpecies(s.notes),
                   };
                 })
                 .filter(Boolean) as UiMarker[];
@@ -195,7 +219,7 @@ export function useMapData() {
     };
   }, [sessionUserId]);
 
-  const addSpot = async (lat: number, lng: number, title: string, description?: string) => {
+  const addSpot = async (lat: number, lng: number, title: string, description?: string, species?: string) => {
     console.log('🔍 addSpot called:', { lat, lng, title, description, sessionUserId });
     
     if (!sessionUserId) {
@@ -205,12 +229,15 @@ export function useMapData() {
 
     try {
       // Try GeoJSON first
+      // Adjuntar tag de especie en notes sin migración
+      const taggedNotes = species ? `${description || ''} [species:${species}]`.trim() : (description || null);
+
       let { data, error } = await supabase
         .from("spots")
         .insert({
           user_id: sessionUserId,
           name: title,
-          notes: description || null,
+          notes: taggedNotes,
           geom: { type: "Point", coordinates: [lng, lat] },
         })
         .select()
@@ -223,7 +250,7 @@ export function useMapData() {
           .insert({
             user_id: sessionUserId,
             name: title,
-            notes: description || null,
+            notes: taggedNotes,
             geom: `SRID=4326;POINT(${lng} ${lat})`,
           })
           .select()
@@ -245,34 +272,36 @@ export function useMapData() {
         lat: lat,
         lng: lng,
         createdAt: data.created_at || null,
+        species: species || null,
       };
       
       // Actualizar marcadores y métricas directamente
       setMarkers(prev => {
         const updatedMarkers = [...prev, newMarker];
         console.log('📍 Markers updated, new count:', updatedMarkers.length);
+        console.log('📍 Previous markers count:', prev.length);
+        console.log('📍 New marker:', newMarker);
         
         // Actualizar métricas inmediatamente
-        setTotalSpots(updatedMarkers.length);
-        
-        // Calcular zonas exploradas
+        const newTotalSpots = updatedMarkers.length;
         const tileKeys = new Set(
           updatedMarkers.map(m => `${Math.floor(m.lat * 20)}-${Math.floor(m.lng * 20)}`)
         );
-        setExploredZones(tileKeys.size);
-        
-        // Calcular setales creados este mes
+        const newExploredZones = tileKeys.size;
         const now = new Date();
         const ym = `${now.getUTCFullYear()}-${String(now.getUTCMonth()+1).padStart(2,'0')}`;
-        setCreatedThisMonth(
-          updatedMarkers.filter(m => m.createdAt?.startsWith(ym)).length
-        );
+        const newCreatedThisMonth = updatedMarkers.filter(m => m.createdAt?.startsWith(ym)).length;
         
-        console.log('📊 Metrics updated directly:', {
-          totalSpots: updatedMarkers.length,
-          exploredZones: tileKeys.size,
-          createdThisMonth: updatedMarkers.filter(m => m.createdAt?.startsWith(ym)).length
+        console.log('📊 Direct metrics update:', {
+          totalSpots: newTotalSpots,
+          exploredZones: newExploredZones,
+          createdThisMonth: newCreatedThisMonth
         });
+        
+        // Actualizar estado directamente
+        setTotalSpots(newTotalSpots);
+        setExploredZones(newExploredZones);
+        setCreatedThisMonth(newCreatedThisMonth);
         
         return updatedMarkers;
       });
