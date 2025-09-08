@@ -262,6 +262,141 @@ serve(async (req) => {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
 
+    } else if (operation === 'grid') {
+      console.log('🗺️ Grid prediction operation requested');
+      
+      const { bbox, zoom } = await req.json();
+      
+      if (!bbox || !bbox.s || !bbox.w || !bbox.n || !bbox.e) {
+        console.error('❌ Invalid bbox provided:', bbox);
+        throw new Error('Valid bbox (south, west, north, east) is required for grid operation');
+      }
+
+      console.log(`📍 Grid bbox: ${bbox.s},${bbox.w} to ${bbox.n},${bbox.e}, zoom: ${zoom}`);
+
+      // Get current weather observations from AEMET
+      const stationsResponse = await fetchWithRetry(
+        `https://opendata.aemet.es/opendata/api/observacion/convencional/todas?api_key=${AEMET_API_KEY}`
+      );
+      
+      const stationsData = await stationsResponse.json();
+      console.log('📊 Stations response:', { estado: stationsData.estado, mensaje: stationsData.descripcion });
+      
+      if (stationsData.estado !== 200) {
+        console.error('❌ AEMET API error:', stationsData);
+        throw new Error(`AEMET API error: ${stationsData.descripcion || 'Unknown error'}`);
+      }
+
+      if (!stationsData.datos) {
+        console.error('❌ No data URL provided by AEMET');
+        throw new Error('No weather data URL provided by AEMET');
+      }
+
+      // Get actual weather data
+      const weatherResponse = await fetchWithRetry(stationsData.datos);
+      const weatherData = await weatherResponse.json();
+      
+      console.log(`📍 Found ${weatherData.length} weather stations`);
+
+      // Filter stations within or near the bbox
+      const relevantStations = weatherData.filter(station => {
+        if (!station.lat || !station.lon) return false;
+        const lat = parseFloat(station.lat);
+        const lng = parseFloat(station.lon);
+        return lat >= bbox.s - 0.1 && lat <= bbox.n + 0.1 && 
+               lng >= bbox.w - 0.1 && lng <= bbox.e + 0.1;
+      });
+
+      console.log(`🎯 Found ${relevantStations.length} relevant stations in bbox`);
+
+      // Generate grid cells
+      const step = zoom <= 8 ? 0.2 : zoom <= 10 ? 0.1 : zoom <= 12 ? 0.05 : 0.025;
+      const cells = [];
+
+      for (let lat = Math.floor(bbox.s / step) * step; lat < bbox.n; lat += step) {
+        for (let lng = Math.floor(bbox.w / step) * step; lng < bbox.e; lng += step) {
+          const cLat = lat + step / 2;
+          const cLng = lng + step / 2;
+
+          // Find nearest station for this cell
+          let nearestStation = null;
+          let minDistance = Infinity;
+
+          for (const station of relevantStations) {
+            const distance = Math.sqrt(
+              Math.pow(parseFloat(station.lat) - cLat, 2) + 
+              Math.pow(parseFloat(station.lon) - cLng, 2)
+            );
+            
+            if (distance < minDistance) {
+              minDistance = distance;
+              nearestStation = station;
+            }
+          }
+
+          // Calculate prediction score based on weather data
+          let score = 0.5; // Default neutral score
+          let rain7d = 0;
+          let rh = 50;
+          let temp = 15;
+
+          if (nearestStation) {
+            // Use real AEMET data
+            rain7d = nearestStation.prec ? parseFloat(nearestStation.prec) : 0;
+            rh = nearestStation.hr ? parseFloat(nearestStation.hr) : 50;
+            temp = nearestStation.ta ? parseFloat(nearestStation.ta) : 15;
+            
+            // Simple scoring algorithm (similar to frontend)
+            const rain7d_norm = Math.max(0, Math.min(1, rain7d / 40));
+            const rh_norm = Math.max(0, Math.min(1, (rh - 70) / 30));
+            const temp_band = temp >= 8 && temp <= 18 ? 1 : (temp >= 5 && temp <= 22 ? 0.5 : 0);
+            const wind = nearestStation.vv ? parseFloat(nearestStation.vv) : 0;
+            const wind_penalty = wind > 35 ? (wind - 35) / 25 : 0;
+            
+            score = Math.max(0, Math.min(1, 
+              0.4 * rain7d_norm + 
+              0.3 * rh_norm + 
+              0.25 * temp_band - 
+              0.1 * wind_penalty
+            ));
+          } else {
+            // Fallback: generate synthetic data based on position
+            const r = Math.sin(cLat * 12.9898 + cLng * 78.233) * 43758.5453;
+            const random = r - Math.floor(r);
+            rain7d = Math.round(10 + random * 60);
+            rh = Math.round(60 + random * 40);
+            temp = Math.round(6 + random * 18);
+            
+            // Apply same scoring
+            const rain7d_norm = Math.max(0, Math.min(1, rain7d / 40));
+            const rh_norm = Math.max(0, Math.min(1, (rh - 70) / 30));
+            const temp_band = temp >= 8 && temp <= 18 ? 1 : (temp >= 5 && temp <= 22 ? 0.5 : 0);
+            
+            score = Math.max(0, Math.min(1, 
+              0.4 * rain7d_norm + 
+              0.3 * rh_norm + 
+              0.25 * temp_band
+            ));
+          }
+
+          cells.push({
+            id: `${cLat.toFixed(3)}_${cLng.toFixed(3)}`,
+            bounds: [[lat, lng], [lat + step, lng + step]],
+            score: Math.round(score * 100) / 100, // Round to 2 decimals
+            rain7d: Math.round(rain7d),
+            rh: Math.round(rh),
+            temp: Math.round(temp),
+            source: nearestStation ? 'aemet' : 'synthetic'
+          });
+        }
+      }
+
+      console.log(`🎯 Generated ${cells.length} grid cells with ${relevantStations.length} AEMET stations`);
+
+      return new Response(JSON.stringify(cells), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+
     } else if (operation === 'historical') {
       console.log('📊 Historical data operation requested');
       
@@ -292,7 +427,7 @@ serve(async (req) => {
     
     } else {
       console.error('❌ Invalid operation requested:', operation);
-      throw new Error(`Invalid operation: ${operation}. Supported operations: current, forecast, historical`);
+      throw new Error(`Invalid operation: ${operation}. Supported operations: current, forecast, historical, grid`);
     }
 
   } catch (error) {
