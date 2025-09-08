@@ -11,7 +11,7 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
   const { user, loading } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const devBypass = typeof window !== 'undefined' && import.meta.env.DEV;
+  const devBypass = typeof window !== 'undefined' && import.meta.env.DEV && !user;
 
   useEffect(() => {
     if (devBypass) return;

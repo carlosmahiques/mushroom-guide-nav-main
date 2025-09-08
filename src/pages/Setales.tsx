@@ -2,8 +2,37 @@ import { Pin, MapPin, Calendar, Star } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { useLimits } from "@/hooks/useLimits";
+import { useLimitsTest } from "@/hooks/useLimitsTest";
+import { useGatedAction } from "@/hooks/useGatedAction";
+import { RegisterModal } from "@/components/ui/RegisterModal";
+import { LimitNudge } from "@/components/ui/LimitNudge";
+import { useAnalytics } from "@/hooks/useAnalytics";
+import { isFeatureEnabled } from "@/config/featureFlags";
+import { useState, useEffect } from "react";
 
 const Setales = () => {
+  const [showRegisterModal, setShowRegisterModal] = useState(false);
+  
+  // Feature flags
+  const isLeanEnabled = isFeatureEnabled('ENABLE_LEAN');
+  const isAnalyticsEnabled = isFeatureEnabled('ENABLE_ANALYTICS');
+  const isGatingEnabled = isFeatureEnabled('ENABLE_GATING');
+  const isPaywallEnabled = isFeatureEnabled('ENABLE_PAYWALL');
+  
+  // Hooks condicionales - usar hook de prueba en desarrollo
+  const limitsHook = isLeanEnabled ? (import.meta.env.DEV ? useLimitsTest() : useLimits()) : { currentUsage: { setales: 0 }, limits: { setales: 999 }, plan: 'free', remaining: { setales: 999 } };
+  const { currentUsage, limits, plan, remaining } = limitsHook;
+  const { gatedAction } = isGatingEnabled ? useGatedAction() : { gatedAction: () => true };
+  const { logPageView } = isAnalyticsEnabled ? useAnalytics() : { logPageView: () => {} };
+
+  // Analytics: page_view (solo si está habilitado)
+  useEffect(() => {
+    if (isAnalyticsEnabled) {
+      logPageView('/setales', plan);
+    }
+  }, [isAnalyticsEnabled, logPageView, plan]);
+
   const mockSetales = [
     {
       id: 1,
@@ -39,16 +68,38 @@ const Setales = () => {
           <h1 className="text-3xl font-bold text-foreground flex items-center gap-3">
             <Pin className="h-8 w-8 text-primary" />
             Mis sétales
+            <span className="text-sm font-normal text-muted-foreground">
+              ({currentUsage.setales}/{limits.setales === Infinity ? '∞' : limits.setales})
+            </span>
           </h1>
           <p className="text-muted-foreground mt-1">
             Gestiona y organiza tus localizaciones favoritas
           </p>
         </div>
-        <Button className="bg-gradient-primary hover:bg-primary-hover shadow-medium">
+        <Button 
+          className="bg-gradient-primary hover:bg-primary-hover shadow-medium"
+          onClick={() => {
+            if (!gatedAction('create_setal')) {
+              setShowRegisterModal(true);
+            }
+          }}
+        >
           <MapPin className="w-4 h-4 mr-2" />
           Añadir localización
         </Button>
       </div>
+
+      {/* Limit Nudge - solo si está habilitado */}
+      {isLeanEnabled && isPaywallEnabled && remaining.setales <= 2 && (
+        <LimitNudge 
+          type="setales" 
+          remaining={remaining.setales}
+          onUpgrade={() => {
+            // TODO: Abrir PaywallModal
+            console.log('Upgrade clicked for setales');
+          }}
+        />
+      )}
 
       {/* Sétales list */}
       <div className="space-y-4">
@@ -111,6 +162,15 @@ const Setales = () => {
             </div>
           </CardContent>
         </Card>
+      )}
+      
+      {/* Register Modal - solo si está habilitado */}
+      {isLeanEnabled && (
+        <RegisterModal 
+          isOpen={showRegisterModal}
+          onClose={() => setShowRegisterModal(false)}
+          trigger="create_setal"
+        />
       )}
     </div>
   );

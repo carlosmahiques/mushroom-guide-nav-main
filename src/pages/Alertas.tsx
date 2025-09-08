@@ -3,8 +3,37 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
+import { useLimits } from "@/hooks/useLimits";
+import { useLimitsTest } from "@/hooks/useLimitsTest";
+import { useGatedAction } from "@/hooks/useGatedAction";
+import { RegisterModal } from "@/components/ui/RegisterModal";
+import { LimitNudge } from "@/components/ui/LimitNudge";
+import { useAnalytics } from "@/hooks/useAnalytics";
+import { isFeatureEnabled } from "@/config/featureFlags";
+import { useState, useEffect } from "react";
 
 const Alertas = () => {
+  const [showRegisterModal, setShowRegisterModal] = useState(false);
+  
+  // Feature flags
+  const isLeanEnabled = isFeatureEnabled('ENABLE_LEAN');
+  const isAnalyticsEnabled = isFeatureEnabled('ENABLE_ANALYTICS');
+  const isGatingEnabled = isFeatureEnabled('ENABLE_GATING');
+  const isPaywallEnabled = isFeatureEnabled('ENABLE_PAYWALL');
+  
+  // Hooks condicionales - usar hook de prueba en desarrollo
+  const limitsHook = isLeanEnabled ? (import.meta.env.DEV ? useLimitsTest() : useLimits()) : { currentUsage: { alertas: 0 }, limits: { alertas: 999 }, plan: 'free', remaining: { alertas: 999 } };
+  const { currentUsage, limits, plan, remaining } = limitsHook;
+  const { gatedAction } = isGatingEnabled ? useGatedAction() : { gatedAction: () => true };
+  const { logPageView } = isAnalyticsEnabled ? useAnalytics() : { logPageView: () => {} };
+
+  // Analytics: page_view (solo si está habilitado)
+  useEffect(() => {
+    if (isAnalyticsEnabled) {
+      logPageView('/alertas', plan);
+    }
+  }, [isAnalyticsEnabled, logPageView, plan]);
+
   const mockAlertas = [
     {
       id: 1,
@@ -66,16 +95,51 @@ const Alertas = () => {
           <h1 className="text-3xl font-bold text-foreground flex items-center gap-3">
             <Bell className="h-8 w-8 text-accent" />
             Alertas
+            <span className="text-sm font-normal text-muted-foreground">
+              ({currentUsage.alertas}/{limits.alertas === Infinity ? '∞' : limits.alertas})
+            </span>
           </h1>
           <p className="text-muted-foreground mt-1">
             Configura notificaciones personalizadas para tus sétales
           </p>
         </div>
-        <Button className="bg-gradient-primary hover:bg-primary-hover shadow-medium">
+        <Button 
+          className="bg-gradient-primary hover:bg-primary-hover shadow-medium"
+          onClick={() => {
+            if (!gatedAction('create_alert')) {
+              setShowRegisterModal(true);
+            } else {
+              // Log alert_create cuando se crea una alerta
+              const alertaId = Date.now().toString();
+              logEvent('alert_create', {
+                alerta_id: alertaId,
+                zona: 'Madrid', // TODO: Obtener del formulario
+                especie: 'Boletus edulis', // TODO: Obtener del formulario
+                condiciones: { temperatura: '15-20°C', humedad: '80%' }, // TODO: Obtener del formulario
+                time_to_first_alert: 0 // TODO: Calcular tiempo desde registro
+              });
+              
+              // TODO: Implementar creación real de alerta
+              console.log('Creando alerta:', alertaId);
+            }
+          }}
+        >
           <Bell className="w-4 h-4 mr-2" />
           Nueva alerta
         </Button>
       </div>
+
+      {/* Limit Nudge - solo si está habilitado */}
+      {isLeanEnabled && isPaywallEnabled && remaining.alertas <= 2 && (
+        <LimitNudge 
+          type="alertas" 
+          remaining={remaining.alertas}
+          onUpgrade={() => {
+            // TODO: Abrir PaywallModal
+            console.log('Upgrade clicked for alertas');
+          }}
+        />
+      )}
 
       {/* Active alerts summary */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -178,6 +242,15 @@ const Alertas = () => {
           </div>
         </CardContent>
       </Card>
+      
+      {/* Register Modal - solo si está habilitado */}
+      {isLeanEnabled && (
+        <RegisterModal 
+          isOpen={showRegisterModal}
+          onClose={() => setShowRegisterModal(false)}
+          trigger="create_alert"
+        />
+      )}
     </div>
   );
 };

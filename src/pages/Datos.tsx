@@ -1,10 +1,12 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { CloudRain, RefreshCw } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useMapData } from "@/hooks/useMapData";
 import { useWeatherData } from "@/hooks/useWeatherData";
+import { useAnalytics } from "@/hooks/useAnalytics";
+import { isFeatureEnabled } from "@/config/featureFlags";
 import { SpotSelector } from "@/components/weather/SpotSelector";
 import { WeatherMetrics } from "@/components/weather/WeatherMetrics";
 import { MushroomConditionsCard } from "@/components/weather/MushroomConditionsCard";
@@ -15,6 +17,31 @@ const Datos = () => {
   const { markers: spots } = useMapData();
   const [selectedSpot, setSelectedSpot] = useState<typeof spots[0] | null>(null);
   const { currentWeather, dailyForecast, mushroomConditions, loading, error, refetch } = useWeatherData(selectedSpot);
+  
+  // Feature flags
+  const isAnalyticsEnabled = isFeatureEnabled('ENABLE_ANALYTICS');
+  
+  // Hooks condicionales
+  const { logPageView, logEvent } = isAnalyticsEnabled ? useAnalytics() : { logPageView: () => {}, logEvent: () => {} };
+
+  // Analytics: page_view (solo si está habilitado)
+  useEffect(() => {
+    if (isAnalyticsEnabled) {
+      logPageView('/datos', 'free');
+    }
+  }, [isAnalyticsEnabled, logPageView]);
+
+  // Analytics: weather_error cuando hay error (solo si está habilitado)
+  useEffect(() => {
+    if (isAnalyticsEnabled && error) {
+      logEvent('weather_error', {
+        status: error.status || 500,
+        source: 'edgeFn',
+        error_message: error.message,
+        timestamp: Date.now(),
+      });
+    }
+  }, [isAnalyticsEnabled, error, logEvent]);
 
   return (
     <div className="p-6 space-y-6">

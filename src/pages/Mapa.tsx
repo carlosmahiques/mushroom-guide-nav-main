@@ -3,13 +3,60 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import MapViewLeaflet from "@/components/MapViewLeaflet";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
-import { useState } from "react";
+import { DemoTour } from "@/components/tour/DemoTour";
+import { RegisterModal } from "@/components/ui/RegisterModal";
+import { DebugInfo } from "@/components/DebugInfo";
+import { AnalyticsDebugOverlay } from "@/components/debug/AnalyticsDebugOverlay";
+import { TestControls } from "@/components/debug/TestControls";
+import { useState, useEffect } from "react";
 import { useMapData } from "@/hooks/useMapData";
+import { useGatedAction } from "@/hooks/useGatedAction";
+import { useAnalytics } from "@/hooks/useAnalytics";
+import { useDemoMode } from "@/hooks/useDemoMode";
+import { useAnalyticsDebug } from "@/hooks/useAnalyticsDebug";
+import { isFeatureEnabled } from "@/config/featureFlags";
 
 
 const Mapa = () => {
   const [placing, setPlacing] = useState(false);
+  const [showRegisterModal, setShowRegisterModal] = useState(false);
   const { totalSpots, exploredZones, createdThisMonth } = useMapData();
+  
+  // Feature flags
+  const isLeanEnabled = isFeatureEnabled('ENABLE_LEAN');
+  const isAnalyticsEnabled = isFeatureEnabled('ENABLE_ANALYTICS');
+  const isGatingEnabled = isFeatureEnabled('ENABLE_GATING');
+  const isDemoModeEnabled = isFeatureEnabled('ENABLE_DEMO_MODE');
+  const isTourEnabled = isFeatureEnabled('ENABLE_TOUR');
+  
+  // Hooks condicionales
+  const { gatedAction } = isGatingEnabled ? useGatedAction() : { gatedAction: () => true };
+  const { logPageView, logEvent } = isAnalyticsEnabled ? useAnalytics() : { logPageView: () => {}, logEvent: () => {} };
+  const { isDemoMode } = useDemoMode();
+  
+  // Debug overlay (solo en desarrollo)
+  const { isVisible: isDebugVisible, hideOverlay: hideDebugOverlay } = useAnalyticsDebug();
+
+  // Asegurar que el modal esté cerrado al inicio
+  useEffect(() => {
+    setShowRegisterModal(false);
+  }, []);
+
+  // Analytics: page_view y demo_view (solo si está habilitado)
+  useEffect(() => {
+    if (isAnalyticsEnabled) {
+      logPageView('/mapa', 'free');
+      
+      if (isDemoMode && isDemoModeEnabled) {
+        logEvent('demo_view', {
+          load_time: Date.now(),
+          setales_count: totalSpots,
+          heatmap_loaded: true,
+          tour_available: isTourEnabled,
+        });
+      }
+    }
+  }, [isAnalyticsEnabled, logPageView, logEvent, isDemoMode, isDemoModeEnabled, isTourEnabled, totalSpots]);
   return (
     <div className="py-6 space-y-6">
       {/* Header */}
@@ -23,10 +70,42 @@ const Mapa = () => {
             Explora y añade tus sétales favoritos en el mapa
           </p>
         </div>
-        <Button className="bg-gradient-primary hover:bg-primary-hover shadow-medium" onClick={() => setPlacing(p => !p)} aria-pressed={placing} aria-label="Nuevo sétal">
-          <Plus className="w-4 h-4 mr-2" />
-          {placing ? 'Haz clic en el mapa' : 'Nuevo sétal'}
-        </Button>
+        <div className="flex gap-2">
+          <Button 
+            className="bg-gradient-primary hover:bg-primary-hover shadow-medium" 
+                      onClick={() => {
+            if (isLeanEnabled && isGatingEnabled) {
+              console.log('🔍 Click en Nuevo sétal - CON GATING');
+              if (gatedAction('create_setal')) {
+                setPlacing(p => !p);
+              } else {
+                setShowRegisterModal(true);
+              }
+            } else {
+              console.log('🔍 Click en Nuevo sétal - SIN GATING');
+              setPlacing(p => !p);
+            }
+          }} 
+            aria-pressed={placing} 
+            aria-label="Nuevo sétal"
+          >
+            <Plus className="w-4 h-4 mr-2" />
+            {placing ? 'Haz clic en el mapa' : 'Nuevo sétal'}
+          </Button>
+          
+          {/* Botón de test temporal - solo en desarrollo */}
+          {import.meta.env.DEV && (
+            <Button 
+              variant="outline"
+              onClick={() => {
+                console.log('🔍 TEST: Forzando modal abierto');
+                setShowRegisterModal(true);
+              }}
+            >
+              TEST Modal
+            </Button>
+          )}
+        </div>
       </div>
 
 {/* Mapa interactivo con Leaflet */}
@@ -108,6 +187,35 @@ const Mapa = () => {
           </CardContent>
         </Card>
       </div>
+      
+      {/* Tour de demo - solo si está habilitado */}
+      {isLeanEnabled && isTourEnabled && <DemoTour />}
+      
+      {/* Register Modal - solo si está habilitado */}
+      {isLeanEnabled && (
+        <RegisterModal 
+          isOpen={showRegisterModal}
+          onClose={() => {
+            console.log('🔍 Cerrando modal');
+            setShowRegisterModal(false);
+          }}
+          trigger="create_setal"
+        />
+      )}
+      
+      {/* Debug Info - solo en desarrollo */}
+      {import.meta.env.DEV && <DebugInfo />}
+      
+      {/* Analytics Debug Overlay - solo en desarrollo */}
+      {/* {import.meta.env.DEV && (
+        <AnalyticsDebugOverlay 
+          isVisible={isDebugVisible}
+          onClose={hideDebugOverlay}
+        />
+      )} */}
+      
+      {/* Test Controls - solo en desarrollo */}
+      {/* {import.meta.env.DEV && <TestControls />} */}
     </div>
   );
 };

@@ -1,8 +1,9 @@
 import { useState, useEffect } from "react";
-import { Menu, X } from "lucide-react";
+import { Menu, X, Home } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { AppSidebar } from "./AppSidebar";
 import { cn } from "@/lib/utils";
+import { NavLink } from "react-router-dom";
 
 interface AppShellProps {
   children: React.ReactNode;
@@ -45,22 +46,34 @@ export function AppShell({ children }: AppShellProps) {
       {/* Fixed Header */}
       <header className="fixed inset-x-0 top-0 h-16 bg-white/80 backdrop-blur-sm border-b border-border z-40">
         <div className="h-full flex items-center justify-between px-4 md:px-6">
-          {/* Mobile hamburger button */}
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={toggleMobileMenu}
-            className="md:hidden p-2"
-            aria-controls="mobile-sidebar"
-            aria-expanded={isMobileMenuOpen}
-            aria-label={isMobileMenuOpen ? "Cerrar menú" : "Abrir menú"}
-          >
-            {isMobileMenuOpen ? (
-              <X className="h-5 w-5" />
-            ) : (
-              <Menu className="h-5 w-5" />
-            )}
-          </Button>
+          <div className="flex items-center gap-3">
+            {/* Botón Home - siempre visible */}
+            <NavLink 
+              to="/" 
+              className="flex items-center gap-2 p-2 rounded-md hover:bg-primary/10 transition-colors"
+              onClick={() => console.log('🏠 Home button clicked, navigating to /')}
+            >
+              <Home className="h-5 w-5 text-primary" />
+              <span className="hidden sm:inline text-sm font-medium text-primary">Inicio</span>
+            </NavLink>
+            
+            {/* Mobile hamburger button */}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={toggleMobileMenu}
+              className="md:hidden p-2"
+              aria-controls="mobile-sidebar"
+              aria-expanded={isMobileMenuOpen}
+              aria-label={isMobileMenuOpen ? "Cerrar menú" : "Abrir menú"}
+            >
+              {isMobileMenuOpen ? (
+                <X className="h-5 w-5" />
+              ) : (
+                <Menu className="h-5 w-5" />
+              )}
+            </Button>
+          </div>
 
           {/* Logo and title */}
           <div className="flex items-center gap-3">

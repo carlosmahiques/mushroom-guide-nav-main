@@ -31,6 +31,38 @@ export function useMapData() {
   const [totalSpots, setTotalSpots] = useState<number>(0);
   const [exploredZones, setExploredZones] = useState<number>(0);
   const [createdThisMonth, setCreatedThisMonth] = useState<number>(0);
+  
+  // Debug: Log state changes
+  useEffect(() => {
+    console.log('🔄 useMapData state changed:', { totalSpots, exploredZones, createdThisMonth });
+  }, [totalSpots, exploredZones, createdThisMonth]);
+  
+  // Update metrics when markers change
+  useEffect(() => {
+    console.log('🔄 Updating metrics based on markers:', markers.length);
+    
+    // Update total spots
+    setTotalSpots(markers.length);
+    
+    // Calculate explored zones
+    const tileKeys = new Set(
+      markers.map(m => `${Math.floor(m.lat * 20)}-${Math.floor(m.lng * 20)}`)
+    );
+    setExploredZones(tileKeys.size);
+    
+    // Calculate created this month
+    const now = new Date();
+    const ym = `${now.getUTCFullYear()}-${String(now.getUTCMonth()+1).padStart(2,'0')}`;
+    setCreatedThisMonth(
+      markers.filter(m => m.createdAt?.startsWith(ym)).length
+    );
+    
+    console.log('📊 Metrics updated:', {
+      totalSpots: markers.length,
+      exploredZones: tileKeys.size,
+      createdThisMonth: markers.filter(m => m.createdAt?.startsWith(ym)).length
+    });
+  }, [markers]);
 
   // Load spots using RPC function
   useEffect(() => {
@@ -164,7 +196,12 @@ export function useMapData() {
   }, [sessionUserId]);
 
   const addSpot = async (lat: number, lng: number, title: string, description?: string) => {
-    if (!sessionUserId) return false;
+    console.log('🔍 addSpot called:', { lat, lng, title, description, sessionUserId });
+    
+    if (!sessionUserId) {
+      console.log('❌ No sessionUserId, cannot add spot');
+      return false;
+    }
 
     try {
       // Try GeoJSON first
@@ -194,10 +231,52 @@ export function useMapData() {
       }
 
       if (error) {
-        console.error("Error adding spot:", error);
+        console.error("❌ Error adding spot:", error);
         return false;
       }
 
+      console.log('✅ Spot added successfully:', data);
+      
+      // Actualizar la lista de marcadores inmediatamente
+      const newMarker = {
+        id: data.id,
+        title: data.name,
+        description: data.notes || undefined,
+        lat: lat,
+        lng: lng,
+        createdAt: data.created_at || null,
+      };
+      
+      // Actualizar marcadores y métricas directamente
+      setMarkers(prev => {
+        const updatedMarkers = [...prev, newMarker];
+        console.log('📍 Markers updated, new count:', updatedMarkers.length);
+        
+        // Actualizar métricas inmediatamente
+        setTotalSpots(updatedMarkers.length);
+        
+        // Calcular zonas exploradas
+        const tileKeys = new Set(
+          updatedMarkers.map(m => `${Math.floor(m.lat * 20)}-${Math.floor(m.lng * 20)}`)
+        );
+        setExploredZones(tileKeys.size);
+        
+        // Calcular setales creados este mes
+        const now = new Date();
+        const ym = `${now.getUTCFullYear()}-${String(now.getUTCMonth()+1).padStart(2,'0')}`;
+        setCreatedThisMonth(
+          updatedMarkers.filter(m => m.createdAt?.startsWith(ym)).length
+        );
+        
+        console.log('📊 Metrics updated directly:', {
+          totalSpots: updatedMarkers.length,
+          exploredZones: tileKeys.size,
+          createdThisMonth: updatedMarkers.filter(m => m.createdAt?.startsWith(ym)).length
+        });
+        
+        return updatedMarkers;
+      });
+      
       return true;
     } catch (error) {
       console.error("Error adding spot:", error);

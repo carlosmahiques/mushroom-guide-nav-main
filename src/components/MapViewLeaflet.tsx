@@ -1,8 +1,12 @@
 import { useEffect, useState, useRef } from "react";
 import { useMapData } from "@/hooks/useMapData";
+import { useDemoMode } from "@/hooks/useDemoMode";
+import { useDemoMarkers } from "@/hooks/useDemoMarkers";
+import { useGatedAction } from "@/hooks/useGatedAction";
+import { useAnalytics } from "@/hooks/useAnalytics";
 import { toast } from "sonner";
 import L from "leaflet";
-import "leaflet/dist/leaflet.css";
+// CSS se carga dinámicamente cuando se necesita el mapa
 import markerIcon2x from "leaflet/dist/images/marker-icon-2x.png";
 import markerIcon from "leaflet/dist/images/marker-icon.png";
 import markerShadow from "leaflet/dist/images/marker-shadow.png";
@@ -23,6 +27,30 @@ L.Icon.Default.mergeOptions({
   shadowUrl: markerShadow,
 });
 
+// Crear icono personalizado para setales
+const createSetalIcon = () => {
+  return L.divIcon({
+    className: 'setal-marker',
+    html: `<div style="
+      width: 24px; 
+      height: 24px; 
+      background: #22c55e; 
+      border: 3px solid white; 
+      border-radius: 50%; 
+      box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      color: white;
+      font-weight: bold;
+    ">🍄</div>`,
+    iconSize: [24, 24],
+    iconAnchor: [12, 12],
+    popupAnchor: [0, -12]
+  });
+};
+
 export default function MapViewLeaflet({
   center,
   zoom = 13,
@@ -34,8 +62,22 @@ export default function MapViewLeaflet({
   const leafletMapRef = useRef<any>(null);
   const [isLoaded, setIsLoaded] = useState(false);
   const [isClient, setIsClient] = useState(false);
+  const [cssLoaded, setCssLoaded] = useState(false);
   const { markers, sessionUserId, loading, addSpot, deleteSpot } = useMapData();
+  const { isDemoMode } = useDemoMode();
+  const demoMarkers = useDemoMarkers();
+  const { gatedAction } = useGatedAction();
+  const { logEvent } = useAnalytics();
   const placingRef = useRef<boolean>(placingMode);
+
+  // Cargar CSS de Leaflet dinámicamente
+  useEffect(() => {
+    if (!cssLoaded) {
+      import('leaflet/dist/leaflet.css').then(() => {
+        setCssLoaded(true);
+      });
+    }
+  }, [cssLoaded]);
 
   // keep latest placing flag in a ref so event handlers see updates
   useEffect(() => {
@@ -169,11 +211,22 @@ export default function MapViewLeaflet({
         ro.observe(mapRef.current as Element);
       }
 
-      // Click to add spots (guarded by auth)
+      // Click to add spots (guarded by auth and gating)
       leafletMapRef.current.on("click", async (e: any) => {
+        // Log demo_interact si está en modo demo y no está colocando
+        if (isDemoMode && !placingRef.current) {
+          logEvent('demo_interact', {
+            action: 'click_map',
+            coordinates: { lat: e.latlng.lat, lng: e.latlng.lng },
+            duration: 0 // TODO: Calcular duración en demo
+          });
+          return;
+        }
+        
         if (!placingRef.current) return;
-        if (!sessionUserId) {
-          toast.error("Debes iniciar sesión para añadir sétales");
+        
+        // Verificar gating antes de proceder
+        if (!gatedAction('create_setal', { coordinates: e.latlng })) {
           return;
         }
         const title = prompt("Título del sétal (3–40 caracteres):");
@@ -188,6 +241,16 @@ export default function MapViewLeaflet({
           return;
         }
         const { lat, lng } = e.latlng;
+        
+        // Log setal_create antes de crear
+        const setalId = Date.now().toString();
+        logEvent('setal_create', {
+          setal_id: setalId,
+          coordinates: { lat, lng },
+          especie: 'desconocida', // TODO: Obtener del formulario
+          time_to_first_setal: 0 // TODO: Calcular tiempo desde registro
+        });
+        
         toast.promise(
           addSpot(lat, lng, title, description),
           {
@@ -230,9 +293,9 @@ export default function MapViewLeaflet({
       }
     });
 
-    // Add markers
+    // Add user markers
     markers.forEach((marker) => {
-      const leafletMarker = L.marker([marker.lat, marker.lng])
+      const leafletMarker = L.marker([marker.lat, marker.lng], { icon: createSetalIcon() })
         .addTo(leafletMapRef.current);
 
       const popupContent = `
@@ -261,6 +324,44 @@ export default function MapViewLeaflet({
 
       leafletMarker.bindPopup(popupContent);
     });
+
+    // Add demo markers if in demo mode
+    if (isDemoMode) {
+      demoMarkers.forEach((demoMarker) => {
+        // Crear icono naranja para marcadores demo
+        const demoIcon = L.divIcon({
+          className: 'demo-marker',
+          html: `<div style="
+            width: 20px; 
+            height: 20px; 
+            background: #FF6B35; 
+            border: 2px solid white; 
+            border-radius: 50%; 
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+          "></div>`,
+          iconSize: [20, 20],
+          iconAnchor: [10, 10],
+        });
+
+        const leafletMarker = L.marker([demoMarker.lat, demoMarker.lng], { icon: demoIcon })
+          .addTo(leafletMapRef.current);
+
+        const popupContent = `
+          <div style="font-family: system-ui; min-width: 200px;">
+            <div style="font-weight: 600; margin-bottom: 4px;">${demoMarker.name}</div>
+            <div style="font-size: 14px; color: #666; margin-bottom: 4px;">${demoMarker.description}</div>
+            <div style="font-size: 12px; color: #FF6B35; margin-bottom: 8px; font-weight: 500;">
+              🍄 Setal de ejemplo
+            </div>
+            <div style="font-size: 12px; color: #999;">
+              (${demoMarker.lat.toFixed(5)}, ${demoMarker.lng.toFixed(5)})
+            </div>
+          </div>
+        `;
+
+        leafletMarker.bindPopup(popupContent);
+      });
+    }
   };
 
   // Make deleteSpot available globally for popup buttons
@@ -307,7 +408,7 @@ export default function MapViewLeaflet({
     if (isLoaded) {
       renderMarkers();
     }
-  }, [markers, isLoaded]);
+  }, [markers, isLoaded, isDemoMode, demoMarkers]);
 
   // Show loading state only until client-side mounts (markers pueden cargar luego)
   if (!isClient) {
@@ -345,6 +446,11 @@ export default function MapViewLeaflet({
       {placingMode && (
         <div className="absolute left-3 top-3 bg-background/90 backdrop-blur px-3 py-2 rounded-md shadow text-sm">
           Haz clic en el mapa para colocar tu sétal
+        </div>
+      )}
+      {isDemoMode && (
+        <div className="absolute top-4 right-4 bg-orange-500 text-white px-3 py-1 rounded text-sm font-semibold opacity-70 z-50">
+          DEMO
         </div>
       )}
     </div>
