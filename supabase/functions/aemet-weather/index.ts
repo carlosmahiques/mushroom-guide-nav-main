@@ -67,7 +67,7 @@ serve(async (req) => {
       throw new Error('AEMET API key not configured');
     }
 
-    if (!lat || !lng) {
+    if (operation !== 'grid' && (!lat || !lng)) {
       console.error('❌ Invalid coordinates:', { lat, lng });
       throw new Error('Valid latitude and longitude are required');
     }
