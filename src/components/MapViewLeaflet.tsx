@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import markerIcon2x from "leaflet/dist/images/marker-icon-2x.png";
 import markerIcon from "leaflet/dist/images/marker-icon.png";
 import markerShadow from "leaflet/dist/images/marker-shadow.png";
+import { buildGrid, colorForScore, type GridCell } from "@/lib/prediction";
 
 type MapViewLeafletProps = {
   center: { lat: number; lng: number };
@@ -91,6 +92,13 @@ export default function MapViewLeaflet({
   addSpot,
   deleteSpot,
 }: MapViewLeafletProps) {
+  function debounce<T extends (...args: any[]) => void>(fn: T, wait = 400) {
+    let t: number | undefined;
+    return (...args: Parameters<T>) => {
+      window.clearTimeout(t);
+      t = window.setTimeout(() => (fn as any)(...args), wait);
+    };
+  }
   const mapRef = useRef<HTMLDivElement>(null);
   const leafletMapRef = useRef<any>(null);
   const [isLoaded, setIsLoaded] = useState(false);
@@ -106,6 +114,14 @@ export default function MapViewLeaflet({
   const [formDesc, setFormDesc] = useState("");
   const [formSpecies, setFormSpecies] = useState<string>('boletus_edulis');
   const [pendingLatLng, setPendingLatLng] = useState<{lat: number; lng: number} | null>(null);
+
+  // Prediction overlay (feature-flagged)
+  const enablePred = (import.meta as any).env?.VITE_ENABLE_PRED_LAYER === '1';
+  const [predOn, setPredOn] = useState(false);
+  const [predOpacity, setPredOpacity] = useState(0.35);
+  const [predLoading, setPredLoading] = useState(false);
+  const predLayerRef = useRef<L.LayerGroup | null>(null);
+  const predCellsRef = useRef<GridCell[] | null>(null);
 
   // Cargar CSS de Leaflet dinámicamente
   useEffect(() => {
@@ -275,6 +291,13 @@ export default function MapViewLeaflet({
       });
 
       setIsLoaded(true);
+      // Prediction overlay: refresh on moveend with debounce
+      const doRefresh = debounce(() => {
+        if (predOn) refreshPrediction();
+      }, 450);
+      leafletMapRef.current.on("moveend", () => {
+        if (predOn) doRefresh();
+      });
       renderMarkers();
 
       return () => {
@@ -294,6 +317,69 @@ export default function MapViewLeaflet({
       toast.error("Error inicializando el mapa");
     }
   }, [isClient, center.lat, center.lng, zoom, sessionUserId]);
+
+  // Build or rebuild prediction overlay
+  const refreshPrediction = () => {
+    if (!leafletMapRef.current || !predOn) return;
+    const map = leafletMapRef.current as L.Map;
+    setPredLoading(true);
+    const cells = buildGrid(map.getBounds(), Math.floor(map.getZoom()));
+    predCellsRef.current = cells;
+
+    if (predLayerRef.current) {
+      predLayerRef.current.remove();
+      predLayerRef.current = null;
+    }
+    const group = L.layerGroup();
+    cells.forEach((cell) => {
+      const rect = L.rectangle(cell.bounds as any, {
+        color: 'transparent',
+        weight: 0,
+        fillColor: colorForScore(cell.score),
+        fillOpacity: predOpacity,
+      });
+      rect.bindTooltip(
+        `Prob. fructificación: ${(cell.score * 100).toFixed(0)}%`+
+        `\nLluvia 7d: ${cell.rain7d} mm`+
+        `\nHumedad: ${cell.rh}%`+
+        `\nTemp: ${cell.temp}ºC`,
+        { sticky: true }
+      );
+      group.addLayer(rect);
+    });
+    group.addTo(map);
+    predLayerRef.current = group;
+    setPredLoading(false);
+  };
+
+  // Turn overlay on/off
+  useEffect(() => {
+    if (!leafletMapRef.current) return;
+    if (!enablePred) return;
+    if (predOn) refreshPrediction();
+    else if (predLayerRef.current) {
+      predLayerRef.current.remove();
+      predLayerRef.current = null;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [predOn]);
+
+  // Rebuild overlay when opacity changes
+  useEffect(() => {
+    if (!predLayerRef.current || !predOn) return;
+    refreshPrediction();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [predOpacity]);
+
+  // Cleanup overlay on unmount
+  useEffect(() => {
+    return () => {
+      if (predLayerRef.current) {
+        predLayerRef.current.remove();
+        predLayerRef.current = null;
+      }
+    };
+  }, []);
 
   // Render markers when markers change
   const renderMarkers = () => {
@@ -507,6 +593,49 @@ export default function MapViewLeaflet({
             <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-2" />
             <p className="text-sm text-muted-foreground">Inicializando mapa...</p>
           </div>
+        </div>
+      )}
+      {/* Prediction controls and legend (feature-flagged) */}
+      {enablePred && (
+        <div className="absolute top-16 right-4 flex flex-col gap-2 items-end z-40">
+          <div className="bg-white/90 backdrop-blur px-3 py-2 rounded-md shadow">
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={predOn}
+                onChange={(e) => setPredOn(e.target.checked)}
+              />
+              Predicción
+            </label>
+            <div className="mt-2">
+              <label className="text-xs text-muted-foreground">Opacidad</label>
+              <input
+                type="range"
+                min={0.1}
+                max={0.9}
+                step={0.05}
+                value={predOpacity}
+                onChange={(e) => setPredOpacity(parseFloat(e.target.value))}
+              />
+            </div>
+          </div>
+          {predOn && (
+            <div className="bg-white/90 backdrop-blur px-3 py-2 rounded-md shadow text-xs w-48">
+              <div className="font-medium mb-1">Prob. fructificación</div>
+              <div
+                style={{
+                  height: 8,
+                  background:
+                    'linear-gradient(90deg, hsl(0 80% 45%), hsl(60 80% 45%), hsl(120 80% 45%))',
+                  borderRadius: 4,
+                }}
+              />
+              <div className="flex justify-between mt-1">
+                <span>0%</span><span>50%</span><span>100%</span>
+              </div>
+              {predLoading && <div className="mt-2 text-[11px] text-muted-foreground">Calculando…</div>}
+            </div>
+          )}
         </div>
       )}
       {placingMode && (

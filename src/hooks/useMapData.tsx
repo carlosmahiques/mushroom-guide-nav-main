@@ -127,10 +127,11 @@ export function useMapData() {
               console.warn("Spot missing coordinates:", s);
               return null;
             }
+            const cleanNotes = (s.notes || '').replace(/\[species:[^\]]+\]/, '').trim();
             return { 
               id: s.id, 
               title: s.name, 
-              description: s.notes ?? undefined, 
+              description: cleanNotes || undefined, 
               lat: s.lat, 
               lng: s.lng,
               createdAt: s.created_at ?? null,
@@ -182,10 +183,11 @@ export function useMapData() {
               const mapped: UiMarker[] = filteredData
                 .map((s: SpotRow) => {
                   if (!s.lat || !s.lng) return null;
+                  const cleanNotes = (s.notes || '').replace(/\[species:[^\]]+\]/, '').trim();
                   return { 
                     id: s.id, 
                     title: s.name, 
-                    description: s.notes ?? undefined, 
+                    description: cleanNotes || undefined, 
                     lat: s.lat, 
                     lng: s.lng,
                     createdAt: s.created_at ?? null,
